@@ -135,6 +135,8 @@ fn make_daemon() -> anyhow::Result<()> {
 }
 #[cfg(feature = "rustls")]
 async fn run_server(incoming: TcpListener) -> anyhow::Result<()> {
+    use rustls::ALL_VERSIONS;
+
     #[cfg(feature = "aws-lc-rs")]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // set file limits
@@ -163,7 +165,7 @@ async fn run_server(incoming: TcpListener) -> anyhow::Result<()> {
 
     println!("serve tls server on {}", incoming.local_addr().unwrap());
 
-    let mut server_config = ServerConfig::builder_with_protocol_versions(&[&version::TLS13])
+    let mut server_config = ServerConfig::builder_with_protocol_versions(ALL_VERSIONS)
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| error(e.to_string()))?;
@@ -181,16 +183,16 @@ async fn run_server(incoming: TcpListener) -> anyhow::Result<()> {
         };
         let tls_acceptor = tls_acceptor.clone();
         tokio::spawn(async move {
-            let tls_stream = match tls_acceptor.accept(tcp_stream).await {
+            let s = match tls_acceptor.accept(tcp_stream).await {
                 Ok(tls_stream) => tls_stream,
                 Err(err) => {
                     eprintln!("failed to perform tls handshake: {err:#}");
                     return;
                 }
             };
-            let _ = http1::Builder::new()
-                .serve_connection(TokioIo::new(tls_stream), service)
-                .await;
+            let mut h1 = http1::Builder::new();
+            h1.keep_alive(false);
+            let _ = h1.serve_connection(TokioIo::new(s), service).await;
         });
     }
 }
@@ -238,7 +240,6 @@ pub async fn create_openssl_config() -> anyhow::Result<Arc<SslContext>> {
     builder.set_session_cache_mode(SslSessionCacheMode::BOTH);
     // disable tls1.3 early data
     builder.set_max_early_data(0)?;
-    builder.set_max_proto_version(Some(SslVersion::TLS1_3))?;
     let ctx = builder.build();
     let shared_ctx = Arc::new(ctx);
     Ok(shared_ctx)
@@ -274,9 +275,9 @@ async fn run_openssl_server(incoming: TcpListener) -> anyhow::Result<()> {
                 eprintln!("{err}");
                 return;
             }
-            let _ = http1::Builder::new()
-                .serve_connection(TokioIo::new(s), service)
-                .await;
+            let mut h1 = http1::Builder::new();
+            h1.keep_alive(false);
+            let _ = h1.serve_connection(TokioIo::new(s), service).await;
         });
     }
 }
