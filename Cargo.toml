@@ -28,7 +28,7 @@ num_cpus = "1.16.0"
 anyhow = { version = "1.0.83" }
 http-body-util = "0.1.1"
 libc = "0.2.154"
-openssl = "0.10.64"
+openssl = { version = "0.10.64", features = ["vendored"]}
 tokio-openssl = "0.6.4"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3.2"

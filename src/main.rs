@@ -31,8 +31,8 @@ use jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-static CERT: &[u8] = include_bytes!("../../certs/www.example.org.full.cert.pem");
-static KEY: &[u8] = include_bytes!("../../certs/www.example.org.full.key.pem");
+static CERT: &[u8] = include_bytes!("../certs/www.example.org.full.cert.pem");
+static KEY: &[u8] = include_bytes!("../certs/www.example.org.full.key.pem");
 fn error(err: String) -> io::Error {
     io::Error::new(io::ErrorKind::Other, err)
 }
@@ -133,7 +133,7 @@ fn make_daemon() -> anyhow::Result<()> {
     }
     return Ok(());
 }
-
+#[cfg(feature = "rustls")]
 async fn run_server(incoming: TcpListener) -> anyhow::Result<()> {
     #[cfg(feature = "aws-lc-rs")]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -147,6 +147,16 @@ async fn run_server(incoming: TcpListener) -> anyhow::Result<()> {
             panic!("setrlimit error")
         }
     };
+
+    fn load_certs() -> io::Result<Vec<CertificateDer<'static>>> {
+        let mut reader = io::BufReader::new(Cursor::new(CERT));
+        rustls_pemfile::certs(&mut reader).collect()
+    }
+
+    fn load_private_key() -> io::Result<PrivateKeyDer<'static>> {
+        let mut reader = io::BufReader::new(Cursor::new(KEY));
+        rustls_pemfile::private_key(&mut reader).map(|key| key.unwrap())
+    }
 
     let certs = load_certs()?;
     let key = load_private_key()?;
@@ -234,8 +244,6 @@ pub async fn create_openssl_config() -> anyhow::Result<Arc<SslContext>> {
     Ok(shared_ctx)
 }
 async fn run_openssl_server(incoming: TcpListener) -> anyhow::Result<()> {
-    #[cfg(feature = "aws-lc-rs")]
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // set file limits
     let li = libc::rlimit {
         rlim_cur: 1000000,
@@ -257,10 +265,15 @@ async fn run_openssl_server(incoming: TcpListener) -> anyhow::Result<()> {
                 continue;
             }
         };
-        let ssl = Ssl::new(&ctx).unwrap();
+        let ctx = ctx.clone();
         tokio::spawn(async move {
+            let mut ssl = Ssl::new(&ctx).unwrap();
+            ssl.set_accept_state();
             let mut s = SslStream::new(ssl, tcp_stream).unwrap();
-            Pin::new(&mut s).do_handshake().await.unwrap();
+            if let Err(err) = Pin::new(&mut s).do_handshake().await {
+                eprintln!("{err}");
+                return;
+            }
             let _ = http1::Builder::new()
                 .serve_connection(TokioIo::new(s), service)
                 .await;
@@ -272,14 +285,4 @@ async fn echo(_req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::E
     let mut response = Response::default();
     *response.status_mut() = StatusCode::OK;
     Ok(response)
-}
-
-fn load_certs() -> io::Result<Vec<CertificateDer<'static>>> {
-    let mut reader = io::BufReader::new(Cursor::new(CERT));
-    rustls_pemfile::certs(&mut reader).collect()
-}
-
-fn load_private_key() -> io::Result<PrivateKeyDer<'static>> {
-    let mut reader = io::BufReader::new(Cursor::new(KEY));
-    rustls_pemfile::private_key(&mut reader).map(|key| key.unwrap())
 }
