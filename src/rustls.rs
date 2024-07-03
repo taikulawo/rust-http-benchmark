@@ -7,7 +7,7 @@ use crate::{echo, CERT, KEY};
 use hyper::{server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::{server::NoServerSessionStorage, ServerConfig, ALL_VERSIONS};
+use rustls::{ServerConfig, ALL_VERSIONS};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
@@ -43,12 +43,10 @@ pub(super) async fn run_server(incoming: TcpListener) -> anyhow::Result<()> {
 
     println!("serve tls server on {}", incoming.local_addr().unwrap());
 
-    let mut server_config = ServerConfig::builder_with_protocol_versions(ALL_VERSIONS)
+    let server_config = ServerConfig::builder_with_protocol_versions(ALL_VERSIONS)
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| error(e.to_string()))?;
-    // disable tls session cache
-    server_config.session_storage = Arc::new(NoServerSessionStorage {});
     let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
     let service = service_fn(echo);
     loop {
