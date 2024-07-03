@@ -33,7 +33,7 @@ tokio-openssl = "0.6.4"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3.2"
 [features]
-default = ["aws-lc-rs", "ossl"]
+default = ["aws-lc-rs", "rustls"]
 ring = ["rustls/ring"]
 aws-lc-rs = []
 jemallocator = []
